@@ -24,7 +24,6 @@ import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.res.Configuration;
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Handler;
@@ -40,6 +39,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
+import android.util.DisplayMetrics;
+import android.graphics.Point;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
@@ -78,18 +79,6 @@ public class SplashScreen extends CordovaPlugin {
         }
     }
 
-    private int getSplashId() {
-        int drawableId = 0;
-        String splashResource = preferences.getString("SplashScreen", "screen");
-        if (splashResource != null) {
-            drawableId = cordova.getActivity().getResources().getIdentifier(splashResource, "drawable", cordova.getActivity().getClass().getPackage().getName());
-            if (drawableId == 0) {
-                drawableId = cordova.getActivity().getResources().getIdentifier(splashResource, "drawable", cordova.getActivity().getPackageName());
-            }
-        }
-        return drawableId;
-    }
-
     @Override
     protected void pluginInitialize() {
         if (HAS_BUILT_IN_SPLASH_SCREEN) {
@@ -103,7 +92,17 @@ public class SplashScreen extends CordovaPlugin {
                 getView().setVisibility(View.INVISIBLE);
             }
         });
-        int drawableId = getSplashId();
+        int drawableId = preferences.getInteger("SplashDrawableId", 0);
+        if (drawableId == 0) {
+            String splashResource = preferences.getString("SplashScreen", "screen");
+            if (splashResource != null) {
+                drawableId = cordova.getActivity().getResources().getIdentifier(splashResource, "drawable", cordova.getActivity().getClass().getPackage().getName());
+                if (drawableId == 0) {
+                    drawableId = cordova.getActivity().getResources().getIdentifier(splashResource, "drawable", cordova.getActivity().getPackageName());
+                }
+                preferences.set("SplashDrawableId", drawableId);
+            }
+        }
 
         // Save initial orientation.
         orientation = cordova.getActivity().getResources().getConfiguration().orientation;
@@ -208,7 +207,7 @@ public class SplashScreen extends CordovaPlugin {
 
             // Splash drawable may change with orientation, so reload it.
             if (splashImageView != null) {
-                int drawableId = getSplashId();
+                int drawableId = preferences.getInteger("SplashDrawableId", 0);
                 if (drawableId != 0) {
                     splashImageView.setImageDrawable(cordova.getActivity().getResources().getDrawable(drawableId));
                 }
@@ -219,7 +218,7 @@ public class SplashScreen extends CordovaPlugin {
     private void removeSplashScreen(final boolean forceHideImmediately) {
         cordova.getActivity().runOnUiThread(new Runnable() {
             public void run() {
-        if (splashDialog != null && splashImageView != null && splashDialog.isShowing()) {//check for non-null splashImageView, see https://issues.apache.org/jira/browse/CB-12277
+                if (splashDialog != null && splashDialog.isShowing()) {
                     final int fadeSplashScreenDuration = getFadeDuration();
                     // CB-10692 If the plugin is being paused/destroyed, skip the fading and hide it immediately
                     if (fadeSplashScreenDuration > 0 && forceHideImmediately == false) {
@@ -238,7 +237,7 @@ public class SplashScreen extends CordovaPlugin {
 
                             @Override
                             public void onAnimationEnd(Animation animation) {
-                                if (splashDialog != null && splashImageView != null && splashDialog.isShowing()) {//check for non-null splashImageView, see https://issues.apache.org/jira/browse/CB-12277
+                                if (splashDialog != null && splashDialog.isShowing()) {
                                     splashDialog.dismiss();
                                     splashDialog = null;
                                     splashImageView = null;
@@ -266,7 +265,7 @@ public class SplashScreen extends CordovaPlugin {
     @SuppressWarnings("deprecation")
     private void showSplashScreen(final boolean hideAfterDelay) {
         final int splashscreenTime = preferences.getInteger("SplashScreenDelay", DEFAULT_SPLASHSCREEN_DURATION);
-        final int drawableId = getSplashId();
+        final int drawableId = preferences.getInteger("SplashDrawableId", 0);
 
         final int fadeSplashScreenDuration = getFadeDuration();
         final int effectiveSplashDuration = Math.max(0, splashscreenTime - fadeSplashScreenDuration);
@@ -360,35 +359,21 @@ public class SplashScreen extends CordovaPlugin {
                 spinnerDialog.setIndeterminate(true);
 
                 RelativeLayout centeredLayout = new RelativeLayout(cordova.getActivity());
-                centeredLayout.setGravity(Gravity.CENTER);
+                centeredLayout.setGravity(Gravity.BOTTOM);
                 centeredLayout.setLayoutParams(new RelativeLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 
                 ProgressBar progressBar = new ProgressBar(webView.getContext());
                 RelativeLayout.LayoutParams layoutParams = new RelativeLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
-                layoutParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM, RelativeLayout.TRUE);
+                layoutParams.addRule(RelativeLayout.CENTER_IN_PARENT, RelativeLayout.TRUE);
                 progressBar.setLayoutParams(layoutParams);
-
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-                    String colorName = preferences.getString("SplashScreenSpinnerColor", null);
-                    if(colorName != null){
-                        int[][] states = new int[][] {
-                            new int[] { android.R.attr.state_enabled}, // enabled
-                            new int[] {-android.R.attr.state_enabled}, // disabled
-                            new int[] {-android.R.attr.state_checked}, // unchecked
-                            new int[] { android.R.attr.state_pressed}  // pressed
-                        };
-                        int progressBarColor = Color.parseColor(colorName);
-                        int[] colors = new int[] {
-                            progressBarColor,
-                            progressBarColor,
-                            progressBarColor,
-                            progressBarColor
-                        };
-                        ColorStateList colorStateList = new ColorStateList(states, colors);
-                        progressBar.setIndeterminateTintList(colorStateList);
-                    }
-                }
-
+                
+                final WindowManager win = (WindowManager)webView.getContext().getSystemService(Context.WINDOW_SERVICE);
+                final Display display = win.getDefaultDisplay();
+                final Point size = new Point();
+                display.getRealSize(size);
+                   
+                // add padding to (top) spinner (75% vertical height)
+                progressBar.setPadding(0, (size.y / 2), 0, 0);
                 centeredLayout.addView(progressBar);
 
                 spinnerDialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
